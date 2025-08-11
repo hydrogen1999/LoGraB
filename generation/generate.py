@@ -3,6 +3,7 @@ from typing import Dict, Any, List
 import json, yaml, numpy as np, torch
 from tqdm import tqdm
 from torch_geometric.datasets import Planetoid
+from torch_geometric.utils import subgraph
 
 from ..utils import set_global_seed, write_jsonl_gz, sha256
 from .d_hop import get_d_hop_patch
@@ -21,8 +22,7 @@ def generate(cfg: Dict[str, Any]):
 
     tag = f"{strategy}_d{d}_k{k}_s{sigma:.2f}_p{p}"
     root = Path(cfg["root_dir"]) / ds_name / tag
-    patches_dir = root / "patches"
-    patches_dir.mkdir(parents=True, exist_ok=True)
+    root.mkdir(parents=True, exist_ok=True)
 
     # load graph via PyG
     data_dir = Path("source_data") / ds_name
@@ -30,17 +30,17 @@ def generate(cfg: Dict[str, Any]):
     data = dataset[0]
     num_nodes, edge_index = data.num_nodes, data.edge_index
 
-    # choose observed vertices (coverage p)
-    observed_mask = np.random.rand(num_nodes) < p
+    # choose observed vertices (coverage p) – node-level
+    observed_mask = np.random.rand(num_nodes) < float(p)
 
-    # ---------------- generate patches ------------------------------------
     all_rows: List[Dict[str, Any]] = []
 
     if strategy == "d-hop":
         nodes_iter = np.nonzero(observed_mask)[0]
         for v in tqdm(nodes_iter, desc="d-hop patches"):
             patch = get_d_hop_patch(int(v), d, edge_index, num_nodes)
-            spec = spectral_embed(patch["edge_index"], len(patch["nodes"],), k, sigma)
+            n_local = int(patch["nodes"].numel())
+            spec = spectral_embed(patch["edge_index"], n_local, k, sigma)
             if spec is None:
                 continue
             row = {
@@ -50,35 +50,42 @@ def generate(cfg: Dict[str, Any]):
                 "eigval": spec["eigval"].tolist(),
                 "center_node_global": int(v),
                 "strategy": strategy,
-                "local_to_global_map": patch["local2global"],
+                "local_to_global_map": {str(l): int(g) for l, g in patch["local2global"].items()},
             }
             all_rows.append(row)
+
     elif strategy == "cluster":
+        # cluster-level coverage (skip some patches) while still respecting node-level realism
         parts = max(32, num_nodes // 512)
         mapping = partition_metis(data, parts)
         patches = build_cluster_patches(data, mapping)
         for idx, patch in enumerate(tqdm(patches, desc="cluster patches")):
-            if np.random.rand() > p:
+            if np.random.rand() > float(p):
                 continue
-            spec = spectral_embed(edge_index[:, torch.isin(edge_index[0], patch["nodes"])]
-                                  , len(patch["nodes"]), k, sigma)
+            # extract local subgraph and relabel
+            sub_ei, _, node_map = subgraph(patch["nodes"], edge_index, relabel_nodes=True)
+            n_local = int(patch["nodes"].numel())
+            spec = spectral_embed(sub_ei, n_local, k, sigma)
             if spec is None:
                 continue
+            l2g = {str(int(l)): int(patch["nodes"][int(l)]) for l in range(n_local)}
             row = {
                 "id": f"patch_{idx}",
                 "nodes_global": patch["nodes"].tolist(),
                 "eigvec": spec["eigvec"].tolist(),
                 "eigval": spec["eigval"].tolist(),
                 "strategy": strategy,
-                "local_to_global_map": {str(i): int(n) for i, n in enumerate(patch["nodes"])},
+                "local_to_global_map": l2g,
             }
             all_rows.append(row)
+
     elif strategy == "random":
         seeds = max(int(0.2 * num_nodes), 256)
         for patch in tqdm(random_seed_patches(num_nodes, seeds, d, edge_index), desc="random patches"):
-            if np.random.rand() > p:
+            if np.random.rand() > float(p):
                 continue
-            spec = spectral_embed(patch["edge_index"], len(patch["nodes"]), k, sigma)
+            n_local = int(patch["nodes"].numel())
+            spec = spectral_embed(patch["edge_index"], n_local, k, sigma)
             if spec is None:
                 continue
             row = {
@@ -88,25 +95,30 @@ def generate(cfg: Dict[str, Any]):
                 "eigval": spec["eigval"].tolist(),
                 "center_node_global": patch.get("center"),
                 "strategy": strategy,
-                "local_to_global_map": patch["local2global"],
+                "local_to_global_map": {str(int(l)): int(g) for l, g in patch["local2global"].items()},
             }
             all_rows.append(row)
     else:
         raise ValueError(f"Unknown strategy {strategy}")
 
     # ------ write files ----------------------------------------------------
-    write_jsonl_gz(root / "patches.jsonl.gz", all_rows)
+    patches_path = root / "patches.jsonl.gz"
+    write_jsonl_gz(patches_path, all_rows)
 
     metadata = {
         "dataset": ds_name,
         "strategy": strategy,
         "parameters": {"d": d, "k": k, "sigma": sigma, "p": p, "seed": seed},
         "num_patches": len(all_rows),
-        "avg_patch_size": float(np.mean([len(r["nodes_global"]) for r in all_rows])),
-        "patches_checksum": sha256(root / "patches.jsonl.gz"),
+        "avg_patch_size": float(np.mean([len(r["nodes_global"]) for r in all_rows])) if all_rows else 0.0,
+        "patches_checksum": sha256(patches_path),
+        "source_data_dir": str(data_dir),
+        "num_nodes": int(num_nodes),
+        "num_edges": int(edge_index.size(1)),
     }
     (root / "metadata.yml").write_text(yaml.safe_dump(metadata, sort_keys=False))
 
     (root / "README.md").write_text(
-        f"# LoGraB instance\n\n- Dataset: {ds_name}\n- Tag: {tag}\n- Params: d={d}, k={k}, σ={sigma}, p={p}\n- Patches: {len(all_rows)}\n")
-
+        f"# LoGraB instance\n\n- Dataset: {ds_name}\n- Tag: {tag}\n"
+        f"- Params: d={d}, k={k}, σ={sigma}, p={p}\n- Patches: {len(all_rows)}\n"
+    )
