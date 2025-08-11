@@ -1,4 +1,3 @@
-# lograb/evaluation/metrics.py
 from typing import Set, Tuple, List
 import networkx as nx
 

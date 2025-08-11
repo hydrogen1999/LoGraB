@@ -1,9 +1,10 @@
-from typing import Dict, Any, Optional
+from typing import Dict, Any, Optional, Literal
 import numpy as np
 import torch
 from scipy.sparse import csr_matrix, diags, identity
 from scipy.sparse.linalg import eigsh
 
+LaplacianType = Literal["unnormalized", "normalized"]
 
 def _build_sparse_adj(edge_index_np: np.ndarray, num_nodes: int) -> csr_matrix:
     # edge_index: shape [2, E], undirected expected (we symmetrize anyway)
@@ -15,20 +16,23 @@ def _build_sparse_adj(edge_index_np: np.ndarray, num_nodes: int) -> csr_matrix:
     A.eliminate_zeros()
     return A
 
+def _unnormalized_laplacian(A: csr_matrix) -> csr_matrix:
+    d = np.ravel(A.sum(axis=1))
+    D = diags(d)
+    return D - A
 
 def _normalized_laplacian(A: csr_matrix) -> csr_matrix:
     d = np.ravel(A.sum(axis=1))
     with np.errstate(divide="ignore"):
         inv_sqrt = np.where(d > 0, 1.0 / np.sqrt(d), 0.0)
     D_inv_sqrt = diags(inv_sqrt)
-    # L = I - D^{-1/2} A D^{-1/2}
     I = identity(A.shape[0], format="csr")
     return I - (D_inv_sqrt @ A @ D_inv_sqrt)
 
-
-def spectral_embed(edge_index: torch.Tensor, num_nodes: int, k: int, sigma: float) -> Optional[Dict[str, Any]]:
+def spectral_embed(edge_index: torch.Tensor, num_nodes: int, k: int, sigma: float,
+                   laplacian: LaplacianType = "unnormalized") -> Optional[Dict[str, Any]]:
     """
-    Return dict with k eigenvectors (+noise) and k+1 eigenvalues of the normalized Laplacian.
+    Return dict with k eigenvectors (+noise) and k+1 eigenvalues of the chosen Laplacian.
     Handles small patches safely and uses robust sparse solvers.
     """
     if num_nodes <= 1:
@@ -36,15 +40,20 @@ def spectral_embed(edge_index: torch.Tensor, num_nodes: int, k: int, sigma: floa
 
     k_eff = max(1, min(k, num_nodes - 1))  # at most n-1 non-zero eigenvalues for connected components
 
-    # Build sparse normalized Laplacian
+    # Build sparse Laplacian
     ei_np = edge_index.detach().cpu().numpy()
     A = _build_sparse_adj(ei_np, num_nodes)
-    L = _normalized_laplacian(A)
+    if laplacian == "normalized":
+        L = _normalized_laplacian(A)
+        which = "SM"
+    else:
+        L = _unnormalized_laplacian(A)
+        which = "SM"
 
     # Compute (k_eff + 1) smallest magnitude eigenpairs for stability
     want = min(k_eff + 1, max(1, num_nodes - 1))
     try:
-        evals, evecs = eigsh(L, k=want, which="SM")
+        evals, evecs = eigsh(L, k=want, which=which)
     except Exception:
         # Shift + invert as fallback
         evals, evecs = eigsh(L + 1e-3 * identity(num_nodes, format="csr"),

@@ -1,6 +1,6 @@
 from pathlib import Path
 from typing import Dict, Any, List
-import json, yaml, numpy as np, torch
+import yaml, numpy as np, torch
 from tqdm import tqdm
 from torch_geometric.datasets import Planetoid
 from torch_geometric.utils import subgraph
@@ -17,10 +17,11 @@ def generate(cfg: Dict[str, Any]):
     ds_name = cfg["dataset_name"]
     strategy = cfg["strategy"]
     d, k, sigma, p, seed = cfg["d"], cfg["k"], cfg["sigma"], cfg["p"], cfg["seed"]
+    laplacian = cfg.get("laplacian", "unnormalized")
 
     set_global_seed(seed)
 
-    tag = f"{strategy}_d{d}_k{k}_s{sigma:.2f}_p{p}"
+    tag = f"{strategy}_d{d}_k{k}_s{sigma:.2f}_p{p}_{laplacian[0]}"
     root = Path(cfg["root_dir"]) / ds_name / tag
     root.mkdir(parents=True, exist_ok=True)
 
@@ -40,7 +41,7 @@ def generate(cfg: Dict[str, Any]):
         for v in tqdm(nodes_iter, desc="d-hop patches"):
             patch = get_d_hop_patch(int(v), d, edge_index, num_nodes)
             n_local = int(patch["nodes"].numel())
-            spec = spectral_embed(patch["edge_index"], n_local, k, sigma)
+            spec = spectral_embed(patch["edge_index"], n_local, k, sigma, laplacian=laplacian)
             if spec is None:
                 continue
             row = {
@@ -65,7 +66,7 @@ def generate(cfg: Dict[str, Any]):
             # extract local subgraph and relabel
             sub_ei, _, node_map = subgraph(patch["nodes"], edge_index, relabel_nodes=True)
             n_local = int(patch["nodes"].numel())
-            spec = spectral_embed(sub_ei, n_local, k, sigma)
+            spec = spectral_embed(sub_ei, n_local, k, sigma, laplacian=laplacian)
             if spec is None:
                 continue
             l2g = {str(int(l)): int(patch["nodes"][int(l)]) for l in range(n_local)}
@@ -85,7 +86,7 @@ def generate(cfg: Dict[str, Any]):
             if np.random.rand() > float(p):
                 continue
             n_local = int(patch["nodes"].numel())
-            spec = spectral_embed(patch["edge_index"], n_local, k, sigma)
+            spec = spectral_embed(patch["edge_index"], n_local, k, sigma, laplacian=laplacian)
             if spec is None:
                 continue
             row = {
@@ -105,10 +106,11 @@ def generate(cfg: Dict[str, Any]):
     patches_path = root / "patches.jsonl.gz"
     write_jsonl_gz(patches_path, all_rows)
 
+    import numpy as np
     metadata = {
         "dataset": ds_name,
         "strategy": strategy,
-        "parameters": {"d": d, "k": k, "sigma": sigma, "p": p, "seed": seed},
+        "parameters": {"d": d, "k": k, "sigma": sigma, "p": p, "seed": seed, "laplacian": laplacian},
         "num_patches": len(all_rows),
         "avg_patch_size": float(np.mean([len(r["nodes_global"]) for r in all_rows])) if all_rows else 0.0,
         "patches_checksum": sha256(patches_path),
@@ -120,5 +122,5 @@ def generate(cfg: Dict[str, Any]):
 
     (root / "README.md").write_text(
         f"# LoGraB instance\n\n- Dataset: {ds_name}\n- Tag: {tag}\n"
-        f"- Params: d={d}, k={k}, σ={sigma}, p={p}\n- Patches: {len(all_rows)}\n"
+        f"- Params: d={d}, k={k}, \u03C3={sigma}, p={p}, L={laplacian}\n- Patches: {len(all_rows)}\n"
     )

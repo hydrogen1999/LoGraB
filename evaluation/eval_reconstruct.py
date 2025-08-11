@@ -2,7 +2,6 @@ from pathlib import Path
 import gzip, json, yaml
 from typing import Set, Tuple
 
-import torch
 from torch_geometric.datasets import Planetoid
 from torch_geometric.utils import to_undirected
 
@@ -66,4 +65,5 @@ def eval_reconstruct(instance: Path, pred: Path):
     E_pred = _load_pred_edges(pred)
 
     cov, prec, rec, coh = coverage_precision_recall_cohesion(E_pred, E_true, V_true)
-    print(f"Coverage {cov:.3f}  Precision {prec:.3f}  Recall {rec:.3f}  Cohesion {coh:.3f}")
+    print(f"[reconstruct] |V_true|={len(V_true)} |E_true|={len(E_true)} |E_pred|={len(E_pred)}")
+    print(f"[reconstruct] Coverage {cov:.3f}  Precision {prec:.3f}  Recall {rec:.3f}  Cohesion {coh:.3f}")

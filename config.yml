@@ -1,0 +1,9 @@
+dataset_name: Cora
+root_dir: instances
+strategy: d-hop          # d-hop | cluster | random
+d: 2
+k: 32
+sigma: 0.05
+p: 0.8
+seed: 42
+laplacian: unnormalized  # or: normalized

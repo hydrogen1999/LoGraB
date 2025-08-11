@@ -2,7 +2,7 @@ from typing import Dict, List, Any
 from collections import defaultdict
 import torch
 import networkx as nx
-from torch_geometric.utils import to_networkx, subgraph
+from torch_geometric.utils import to_networkx
 
 # Try METIS; if unavailable, fall back gracefully
 try:
