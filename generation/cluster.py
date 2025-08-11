@@ -1,29 +1,55 @@
 from typing import Dict, List, Any
+from collections import defaultdict
 import torch
 import networkx as nx
-import metis
-from torch_geometric.utils import to_networkx
+from torch_geometric.utils import to_networkx, subgraph
+
+# Try METIS; if unavailable, fall back gracefully
+try:
+    import metis  # type: ignore
+    _HAS_METIS = True
+except Exception:
+    _HAS_METIS = False
 
 
 def partition_metis(data, parts: int = 64) -> Dict[int, int]:
-    """Return mapping node ‑> cluster id via METIS."""
+    """
+    Return mapping node -> cluster id.
+    Uses METIS if available; otherwise falls back to greedy modularity communities.
+    """
     g_nx = to_networkx(data, to_undirected=True)
-    _, part_vec = metis.part_graph(g_nx, parts)
-    return {n: part_vec[i] for i, n in enumerate(g_nx.nodes())}
+    if _HAS_METIS:
+        _, part_vec = metis.part_graph(g_nx, parts)
+        return {n: int(part_vec[i]) for i, n in enumerate(g_nx.nodes())}
+
+    # Fallback: greedy modularity communities, then fold into `parts` bins
+    comms = list(nx.algorithms.community.greedy_modularity_communities(g_nx, weight=None))
+    mapping: Dict[int, int] = {}
+    cid = 0
+    for C in comms:
+        for n in C:
+            mapping[int(n)] = cid % parts
+        cid += 1
+    return mapping
 
 
 def build_cluster_patches(data, mapping: Dict[int, int]) -> List[Dict[str, Any]]:
-    edge_index = data.edge_index
-    clusters = {}
+    """
+    Build patches by taking each cluster core and expanding with a 1-hop boundary.
+    Returns nodes as a torch.long tensor (global ids); edges will be built later via `subgraph`.
+    """
+    clusters: Dict[int, set] = defaultdict(set)
     for v, cid in mapping.items():
-        clusters.setdefault(cid, set()).add(v)
+        clusters[int(cid)].add(int(v))
 
-    patches = []
+    edge_index = data.edge_index
+    patches: List[Dict[str, Any]] = []
+
     for cid, core in clusters.items():
-        core = set(core)
-        # add 1‑hop boundary overlap
-        mask_core = torch.isin(edge_index[0], torch.tensor(sorted(core)))
-        boundary = set(edge_index[1, mask_core].tolist())
-        patch_nodes = sorted(core | boundary)
-        patches.append({"nodes": torch.tensor(patch_nodes, dtype=torch.long), "center": None})
+        core_t = torch.tensor(sorted(core), dtype=torch.long)
+        # 1-hop neighbors around core (either endpoint in core)
+        mask = torch.isin(edge_index[0], core_t) | torch.isin(edge_index[1], core_t)
+        boundary_nodes = torch.unique(edge_index[:, mask])
+        patch_nodes = torch.unique(torch.cat([core_t, boundary_nodes]))
+        patches.append({"nodes": patch_nodes, "center": None})
     return patches
