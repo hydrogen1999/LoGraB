@@ -9,13 +9,12 @@ from torch_geometric.datasets import Planetoid
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import subgraph
-from torch_geometric.nn import GCNConv, SAGEConv, GATConv, GINConv
+
 from .models import get_builder
+from .utils import load_metadata
 from sklearn.metrics import f1_score
 import numpy as np
 
-def _load_metadata(instance: Path) -> Dict[str, Any]:
-    return yaml.safe_load((instance / "metadata.yml").read_text())
 
 def _load_patches(instance: Path) -> List[Dict[str, Any]]:
     rows = []
@@ -62,17 +61,19 @@ def _epoch(model, loader, opt, device, train=True):
     total_loss = 0.0
     ys, ps = [], []
     ce = nn.CrossEntropyLoss()
-    for batch in loader:
-        batch = batch.to(device)
-        out = model(batch.x, batch.edge_index)
-        loss = ce(out, batch.y)
-        if train:
-            opt.zero_grad()
-            loss.backward()
-            opt.step()
-        total_loss += float(loss.item()) * batch.num_nodes
-        ys.append(batch.y.detach().cpu().numpy())
-        ps.append(out.detach().cpu().argmax(-1).numpy())
+    ctx = torch.enable_grad() if train else torch.no_grad()
+    with ctx:
+        for batch in loader:
+            batch = batch.to(device)
+            out = model(batch.x, batch.edge_index)
+            loss = ce(out, batch.y)
+            if train:
+                opt.zero_grad()
+                loss.backward()
+                opt.step()
+            total_loss += float(loss.item()) * batch.num_nodes
+            ys.append(batch.y.detach().cpu().numpy())
+            ps.append(out.detach().cpu().argmax(-1).numpy())
     y = np.concatenate(ys)
     p = np.concatenate(ps)
     micro = f1_score(y, p, average="micro")
@@ -80,7 +81,7 @@ def _epoch(model, loader, opt, device, train=True):
     return total_loss / sum(len(a) for a in ys), micro, macro
 
 def eval_nodeclf(instance: Path, pred: Path, **hparams):
-    meta = _load_metadata(instance)
+    meta = load_metadata(instance)
     ds_name = meta["dataset"]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -170,5 +171,7 @@ def eval_nodeclf(instance: Path, pred: Path, **hparams):
                 C[gidx] += 1.0
             C[C == 0] = 1.0
             E = S / C.unsqueeze(-1)
+            from pathlib import Path as _P
+            _P(save_emb).parent.mkdir(parents=True, exist_ok=True)
             torch.save(E, save_emb)
         print(f"[nodeclf] Saved embeddings to {save_emb}")
