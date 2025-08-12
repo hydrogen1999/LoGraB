@@ -125,9 +125,11 @@ def eval_nodeclf(instance: Path, pred: Path, **hparams):
 
     bs = int(hparams.get('batch', 32))
     epochs = int(hparams.get('epochs', 100))
-    train_loader = DataLoader(train_list, batch_size=bs, shuffle=True)
-    val_loader   = DataLoader(val_list, batch_size=bs, shuffle=False)
-    test_loader  = DataLoader(test_list, batch_size=bs, shuffle=False)
+    num_workers = int(hparams.get('num_workers', 0))
+    pin = torch.cuda.is_available()
+    train_loader = DataLoader(train_list, batch_size=bs, shuffle=True,  num_workers=num_workers, pin_memory=pin)
+    val_loader   = DataLoader(val_list,   batch_size=bs, shuffle=False, num_workers=num_workers, pin_memory=pin)
+    test_loader  = DataLoader(test_list,  batch_size=bs, shuffle=False, num_workers=num_workers, pin_memory=pin)
 
     ckpt = hparams.get('checkpoint', None)
     if ckpt is not None and pathlib.Path(ckpt).exists():

@@ -28,13 +28,16 @@ def _pairs_cross_components(E_true: Set[Tuple[int, int]], comp: Dict[int, int]) 
             pos.append((u, v))
     return pos
 
-def _sample_negatives(num_nodes: int, size: int, E_true: Set[Tuple[int,int]], comp: Dict[int,int], rng: random.Random):
+def _sample_negatives(num_nodes, size, E_true, comp, rng):
     neg = set()
     nodes_with_comp = list(comp.keys())
     if len(nodes_with_comp) < 2:
         return []
-    while len(neg) < size:
+    max_trials = 50 * max(1, size)
+    trials = 0
+    while len(neg) < size and trials < max_trials:
         u, v = rng.sample(nodes_with_comp, 2)
+        trials += 1
         if comp.get(u) == comp.get(v):
             continue
         a, b = (u, v) if u < v else (v, u)
@@ -43,7 +46,7 @@ def _sample_negatives(num_nodes: int, size: int, E_true: Set[Tuple[int,int]], co
         neg.add((a, b))
     return list(neg)
 
-def eval_linkpred(instance: Path, pred: Path, embeddings: Path = None):
+def eval_linkpred(instance: Path, pred: Path, embeddings: Path = None, scorer: str = "dot"):
     meta = load_metadata(instance)
     ds_name = meta["dataset"]
     rng = random.Random(42)
@@ -75,6 +78,11 @@ def eval_linkpred(instance: Path, pred: Path, embeddings: Path = None):
     neg = _sample_negatives(num_nodes, len(pos), E_true, comp, rng)
 
     def score(u, v):
+        if scorer == "cosine":
+            xu, xv = X[u], X[v]
+            nu = torch.norm(xu).item() or 1.0
+            nv = torch.norm(xv).item() or 1.0
+            return float(torch.dot(xu, xv).item() / (nu * nv))
         return float((X[u] * X[v]).sum().item())
 
     y = np.array([1]*len(pos) + [0]*len(neg), dtype=np.int32)

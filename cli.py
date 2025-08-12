@@ -27,6 +27,8 @@ def main():
     e.add_argument("--wd", type=float, default=5e-4)
     e.add_argument("--checkpoint", type=Path, default=None)
     e.add_argument("--save-embeddings", type=Path, default=None, help="Where to save node embeddings after training (optional).")
+    e.add_argument("--scorer", type=str, default="dot", choices=["dot", "cosine"])
+    e.add_argument("--num-workers", type=int, default=0)
 
     s = sub.add_parser("splits")
     s.add_argument("--instance", type=Path, required=True)
@@ -47,7 +49,7 @@ def main():
         elif args.task == "linkpred":
             if args.pred is None:
                 p.error("--pred is required for task=linkpred")
-            eval_linkpred(args.instance, args.pred, embeddings=args.embeddings)
+            eval_linkpred(args.instance, args.pred, embeddings=args.embeddings, scorer=args.scorer)
         else:
             eval_nodeclf(
                 args.instance,
