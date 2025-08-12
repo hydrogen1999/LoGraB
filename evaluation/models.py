@@ -38,7 +38,7 @@ def _build_gcn(in_dim: int, out_dim: int, hid: int = 64, dropout: float = 0.5, *
             self.dp = nn.Dropout(dropout)
         def forward(self, x, edge_index):
             x = self.conv1(x, edge_index).relu()
-            x = self.dp(x)
+            self.dp(x)
             x = self.conv2(x, edge_index)
             return x
     return GCN(in_dim, hid, out_dim, dropout)

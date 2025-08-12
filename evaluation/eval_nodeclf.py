@@ -5,16 +5,14 @@ from typing import Dict, List, Any
 
 import torch
 from torch import nn
-from torch_geometric.datasets import Planetoid
 from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import subgraph
-
 from .models import get_builder
 from .utils import load_metadata
+from ..evaluation.utils import load_source_graph
 from sklearn.metrics import f1_score
 import numpy as np
-
 
 def _load_patches(instance: Path) -> List[Dict[str, Any]]:
     rows = []
@@ -85,8 +83,9 @@ def eval_nodeclf(instance: Path, pred: Path, **hparams):
     ds_name = meta["dataset"]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    dataset = Planetoid(str(Path("source_data") / ds_name), name=ds_name)
-    data = dataset[0]
+    data = load_source_graph(ds_name)
+    if getattr(data.y, 'ndim', 1) > 1 and data.y.size(-1) == 1:
+        data.y = data.y.view(-1)
     num_classes = int(data.y.max().item() + 1)
 
     rows = _load_patches(instance)
@@ -151,7 +150,6 @@ def eval_nodeclf(instance: Path, pred: Path, **hparams):
     te_loss, te_micro, te_macro = _epoch(model, test_loader, opt, device, train=False)
     print(f"[nodeclf] F1-micro {te_micro:.4f}  F1-macro {te_macro:.4f}")
 
-    # Optional embeddings save
     save_emb = hparams.get('save_embeddings', None)
     if save_emb is not None:
         model.eval()
@@ -171,7 +169,5 @@ def eval_nodeclf(instance: Path, pred: Path, **hparams):
                 C[gidx] += 1.0
             C[C == 0] = 1.0
             E = S / C.unsqueeze(-1)
-            from pathlib import Path as _P
-            _P(save_emb).parent.mkdir(parents=True, exist_ok=True)
             torch.save(E, save_emb)
         print(f"[nodeclf] Saved embeddings to {save_emb}")

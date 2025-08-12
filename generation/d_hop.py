@@ -1,8 +1,6 @@
-
 from typing import Dict, Any
 import torch
 from torch_geometric.utils import k_hop_subgraph
-
 
 def get_d_hop_patch(node_idx: int, d: int, edge_index: torch.Tensor, num_nodes: int) -> Dict[str, Any]:
     subset, sub_edge_index, mapping, _ = k_hop_subgraph(node_idx, d, edge_index,

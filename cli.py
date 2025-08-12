@@ -49,7 +49,6 @@ def main():
                 p.error("--pred is required for task=linkpred")
             eval_linkpred(args.instance, args.pred, embeddings=args.embeddings)
         else:
-            # nodeclf
             eval_nodeclf(
                 args.instance,
                 args.pred or Path("_unused.txt"),

@@ -2,7 +2,6 @@ from pathlib import Path
 from typing import Dict, Any, List
 import yaml, numpy as np, torch
 from tqdm import tqdm
-from torch_geometric.datasets import Planetoid
 from torch_geometric.utils import subgraph
 
 from ..utils import set_global_seed, write_jsonl_gz, sha256
@@ -10,7 +9,7 @@ from .d_hop import get_d_hop_patch
 from .cluster import partition_metis, build_cluster_patches
 from .random import random_seed_patches
 from .spectral import spectral_embed
-
+from ..evaluation.utils import load_source_graph
 
 def generate(cfg: Dict[str, Any]):
     ds_name = cfg["dataset_name"]
@@ -25,8 +24,7 @@ def generate(cfg: Dict[str, Any]):
     root.mkdir(parents=True, exist_ok=True)
 
     data_dir = Path("source_data") / ds_name
-    dataset = Planetoid(str(data_dir), name=ds_name)
-    data = dataset[0]
+    data = load_source_graph(ds_name)
     num_nodes, edge_index = data.num_nodes, data.edge_index
 
     observed_mask = np.random.rand(num_nodes) < float(p)

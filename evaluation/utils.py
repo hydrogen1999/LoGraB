@@ -9,7 +9,20 @@ def load_metadata(instance_path: Path) -> Dict[str, Any]:
     return yaml.safe_load((instance_path / "metadata.yml").read_text())
 
 def load_source_graph(dataset_name: str):
-    return Planetoid(str(Path("source_data") / dataset_name), name=dataset_name)[0]
+    root = Path("source_data") / dataset_name
+    name = dataset_name.lower()
+    if name in {"cora", "citeseer", "pubmed"}:
+        return Planetoid(str(root), name=dataset_name)[0]
+    if name in {"ogbn-arxiv", "ogbn_arxiv"}:
+        from ogb.nodeproppred import PygNodePropPredDataset
+        ds = PygNodePropPredDataset(name="ogbn-arxiv", root=str(root))
+        data = ds[0]
+        # y is [N,1] -> [N]
+        if getattr(data.y, "ndim", 1) > 1 and data.y.size(-1) == 1:
+            import torch
+            data.y = data.y.view(-1)
+        return data
+    raise ValueError(f"Unsupported dataset '{dataset_name}'. Supported: Cora/Citeseer/PubMed/ogbn-arXiv.")
 
 def load_predicted_edges(pred_path: Path) -> Set[Tuple[int, int]]:
     E = set()

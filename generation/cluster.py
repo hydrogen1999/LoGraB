@@ -10,7 +10,6 @@ try:
 except Exception:
     _HAS_METIS = False
 
-
 def partition_metis(data, parts: int = 64) -> Dict[int, int]:
     g_nx = to_networkx(data, to_undirected=True)
     if _HAS_METIS:
@@ -24,7 +23,6 @@ def partition_metis(data, parts: int = 64) -> Dict[int, int]:
             mapping[int(n)] = cid % parts
         cid += 1
     return mapping
-
 
 def build_cluster_patches(data, mapping: Dict[int, int]) -> List[Dict[str, Any]]:
     clusters: Dict[int, set] = defaultdict(set)

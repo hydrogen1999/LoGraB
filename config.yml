@@ -1,4 +1,4 @@
-dataset_name: Cora
+dataset_name: Cora        # or: Citeseer | PubMed | ogbn-arxiv
 root_dir: instances
 strategy: d-hop          # d-hop | cluster | random
 d: 2
