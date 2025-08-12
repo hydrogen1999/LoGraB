@@ -9,8 +9,8 @@ from torch_geometric.data import Data
 from torch_geometric.loader import DataLoader
 from torch_geometric.utils import subgraph
 from .models import get_builder
-from .utils import load_metadata
-from ..evaluation.utils import load_source_graph
+from .utils import load_metadata, load_source_graph
+from ..utils import set_global_seed
 from sklearn.metrics import f1_score
 import numpy as np
 
@@ -79,6 +79,7 @@ def _epoch(model, loader, opt, device, train=True):
     return total_loss / sum(len(a) for a in ys), micro, macro
 
 def eval_nodeclf(instance: Path, pred: Path, **hparams):
+    set_global_seed(int(hparams.get('seed', 42)))
     meta = load_metadata(instance)
     ds_name = meta["dataset"]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -169,5 +170,7 @@ def eval_nodeclf(instance: Path, pred: Path, **hparams):
                 C[gidx] += 1.0
             C[C == 0] = 1.0
             E = S / C.unsqueeze(-1)
+            from pathlib import Path as _P
+            _P(save_emb).parent.mkdir(parents=True, exist_ok=True)
             torch.save(E, save_emb)
         print(f"[nodeclf] Saved embeddings to {save_emb}")
