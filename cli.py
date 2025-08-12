@@ -62,6 +62,7 @@ def main():
                 wd=args.wd,
                 checkpoint=args.checkpoint,
                 save_embeddings=args.save_embeddings,
+                num_workers=args.num_workers,
             )
 
 

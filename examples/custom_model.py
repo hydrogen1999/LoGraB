@@ -1,5 +1,6 @@
 # Usage:
-#   python -m lograb eval --task nodeclf --instance ... #     --model lograb.examples.custom_model:build --model-cfg my_model.yml
+#   python -m lograb eval --task nodeclf --instance ... 
+#    --model lograb.examples.custom_model:build --model-cfg my_model.yml
 from __future__ import annotations
 import torch.nn as nn
 from torch_geometric.nn import SAGEConv
