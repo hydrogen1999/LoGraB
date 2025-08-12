@@ -17,7 +17,8 @@ def main():
     e.add_argument("--task", choices=["reconstruct", "nodeclf", "linkpred"], required=True)
     e.add_argument("--instance", type=Path, required=True)
     e.add_argument("--pred", type=Path, required=False)
-    # Nodeclf extras (ignored by other tasks)
+    e.add_argument("--embeddings", type=Path, default=None, help="Path to learned node embeddings for link prediction scorer.")
+    # Nodeclf extras
     e.add_argument("--model", type=str, default="sage")
     e.add_argument("--model-cfg", type=Path, default=None)
     e.add_argument("--epochs", type=int, default=100)
@@ -25,6 +26,7 @@ def main():
     e.add_argument("--lr", type=float, default=1e-2)
     e.add_argument("--wd", type=float, default=5e-4)
     e.add_argument("--checkpoint", type=Path, default=None)
+    e.add_argument("--save-embeddings", type=Path, default=None, help="Where to save node embeddings after training (optional).")
 
     s = sub.add_parser("splits")
     s.add_argument("--instance", type=Path, required=True)
@@ -45,7 +47,7 @@ def main():
         elif args.task == "linkpred":
             if args.pred is None:
                 p.error("--pred is required for task=linkpred")
-            eval_linkpred(args.instance, args.pred)
+            eval_linkpred(args.instance, args.pred, embeddings=args.embeddings)
         else:
             # nodeclf
             eval_nodeclf(
@@ -58,6 +60,7 @@ def main():
                 lr=args.lr,
                 wd=args.wd,
                 checkpoint=args.checkpoint,
+                save_embeddings=args.save_embeddings,
             )
 
 

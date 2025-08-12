@@ -23,14 +23,10 @@ def _load_patch_nodes(instance: Path) -> Dict[str, Set[int]]:
 
 
 def compute_patch_splits(instance: Path, seed: int = 42, ratios=(0.6, 0.2, 0.2)):
-    """Assign patches to train/val/test, keeping overlapping patches in the *same* split.
-    Greedy packing over the patch-overlap graph for disjointness priority.
-    """
     rnd = random.Random(seed)
     ids = _load_patch_ids(instance)
     nodes = _load_patch_nodes(instance)
 
-    # Build overlap graph (patch adjacency if share any node)
     neigh = {pid: set() for pid in ids}
     by_node: Dict[int, List[str]] = {}
     for pid, S in nodes.items():
@@ -42,7 +38,6 @@ def compute_patch_splits(instance: Path, seed: int = 42, ratios=(0.6, 0.2, 0.2))
                 a, b = lst[i], lst[j]
                 neigh[a].add(b); neigh[b].add(a)
 
-    # Connected components in patch graph
     unvis = set(ids)
     comps: List[List[str]] = []
     while unvis:
@@ -70,7 +65,6 @@ def compute_patch_splits(instance: Path, seed: int = 42, ratios=(0.6, 0.2, 0.2))
         else:
             test += comp
 
-    # Persist
     out = {
         "seed": seed,
         "ratios": list(ratios),

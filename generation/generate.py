@@ -13,7 +13,6 @@ from .spectral import spectral_embed
 
 
 def generate(cfg: Dict[str, Any]):
-    """Create one LoGraB instance from *cfg* dict."""
     ds_name = cfg["dataset_name"]
     strategy = cfg["strategy"]
     d, k, sigma, p, seed = cfg["d"], cfg["k"], cfg["sigma"], cfg["p"], cfg["seed"]
@@ -25,13 +24,11 @@ def generate(cfg: Dict[str, Any]):
     root = Path(cfg["root_dir"]) / ds_name / tag
     root.mkdir(parents=True, exist_ok=True)
 
-    # load graph via PyG
     data_dir = Path("source_data") / ds_name
     dataset = Planetoid(str(data_dir), name=ds_name)
     data = dataset[0]
     num_nodes, edge_index = data.num_nodes, data.edge_index
 
-    # choose observed vertices (coverage p) – node-level
     observed_mask = np.random.rand(num_nodes) < float(p)
 
     all_rows: List[Dict[str, Any]] = []
@@ -56,14 +53,12 @@ def generate(cfg: Dict[str, Any]):
             all_rows.append(row)
 
     elif strategy == "cluster":
-        # cluster-level coverage (skip some patches) while still respecting node-level realism
         parts = max(32, num_nodes // 512)
         mapping = partition_metis(data, parts)
         patches = build_cluster_patches(data, mapping)
         for idx, patch in enumerate(tqdm(patches, desc="cluster patches")):
             if np.random.rand() > float(p):
                 continue
-            # extract local subgraph and relabel
             sub_ei, _, node_map = subgraph(patch["nodes"], edge_index, relabel_nodes=True)
             n_local = int(patch["nodes"].numel())
             spec = spectral_embed(sub_ei, n_local, k, sigma, laplacian=laplacian)
@@ -102,7 +97,6 @@ def generate(cfg: Dict[str, Any]):
     else:
         raise ValueError(f"Unknown strategy {strategy}")
 
-    # ------ write files ----------------------------------------------------
     patches_path = root / "patches.jsonl.gz"
     write_jsonl_gz(patches_path, all_rows)
 

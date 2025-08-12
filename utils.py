@@ -7,7 +7,6 @@ import torch
 
 
 def sha256(path: Path, chunk: int = 4096) -> str:
-    """Return SHA-256 hex digest for *path*."""
     h = hashlib.sha256()
     with path.open("rb") as f:
         for blk in iter(lambda: f.read(chunk), b""):
@@ -16,7 +15,6 @@ def sha256(path: Path, chunk: int = 4096) -> str:
 
 
 def write_jsonl_gz(path: Path, rows: List[Dict[str, Any]]):
-    """Write *rows* list to *.jsonl.gz* file at *path*."""
     path.parent.mkdir(parents=True, exist_ok=True)
     with gzip.open(path, "wt", encoding="utf-8") as f:
         for r in rows:

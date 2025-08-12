@@ -28,12 +28,10 @@ def _ensure_splits(instance: Path, seed: int = 42):
     sp = instance / "splits.yml"
     if sp.exists():
         return yaml.safe_load(sp.read_text())
-    # fallback: 60/20/20 theo patch, KHÔNG tách patch đang overlap
     from ..splits import compute_patch_splits
     return compute_patch_splits(instance, seed=seed)
 
 def _build_patch_graph(row: Dict[str, Any], data, add_spec: bool = True) -> Data:
-    # Map local->global
     l2g = row.get("local_to_global_map", None)
     if l2g is None:
         local2global = {i: int(g) for i, g in enumerate(row["nodes_global"])}
@@ -43,7 +41,6 @@ def _build_patch_graph(row: Dict[str, Any], data, add_spec: bool = True) -> Data
     globals_sorted = [local2global[i] for i in range(len(local2global))]
     node_idx = torch.tensor(globals_sorted, dtype=torch.long)
 
-    # subgraph edges (local relabel)
     sub_ei, _, _ = subgraph(node_idx, data.edge_index, relabel_nodes=True)
     x_orig = data.x[node_idx].to(torch.float)
 
@@ -56,7 +53,9 @@ def _build_patch_graph(row: Dict[str, Any], data, add_spec: bool = True) -> Data
         x = x_orig
 
     y = data.y[node_idx].long()
-    return Data(x=x, edge_index=sub_ei, y=y)
+    d = Data(x=x, edge_index=sub_ei, y=y)
+    d.gidx = node_idx
+    return d
 
 def _epoch(model, loader, opt, device, train=True):
     model.train(train)
@@ -81,7 +80,6 @@ def _epoch(model, loader, opt, device, train=True):
     return total_loss / sum(len(a) for a in ys), micro, macro
 
 def eval_nodeclf(instance: Path, pred: Path, **hparams):
-    """Train/eval a GNN on patch-level splits. Extensible via --model and --model-cfg."""
     meta = _load_metadata(instance)
     ds_name = meta["dataset"]
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -93,7 +91,6 @@ def eval_nodeclf(instance: Path, pred: Path, **hparams):
     rows = _load_patches(instance)
     splits = _ensure_splits(instance, seed=42)
 
-    # Build Data objects per patch id
     id2row = {r["id"]: r for r in rows}
     def build_list(ids: List[str]) -> List[Data]:
         lst = []
@@ -112,7 +109,6 @@ def eval_nodeclf(instance: Path, pred: Path, **hparams):
     if not (train_list and val_list and test_list):
         raise RuntimeError("Empty split lists; check splits.yml / patches.jsonl.gz")
 
-    # --- Build model from registry/dynamic import ---
     in_dim = train_list[0].num_node_features
     model_name = hparams.get('model', 'sage')
     model_cfg = {}
@@ -122,19 +118,16 @@ def eval_nodeclf(instance: Path, pred: Path, **hparams):
     builder = get_builder(model_name)
     model = builder(in_dim=in_dim, out_dim=num_classes, **model_cfg).to(device)
 
-    # Optim
     lr = float(hparams.get('lr', 1e-2))
     wd = float(hparams.get('wd', 5e-4))
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=wd)
 
-    # DataLoaders & epochs
     bs = int(hparams.get('batch', 32))
     epochs = int(hparams.get('epochs', 100))
     train_loader = DataLoader(train_list, batch_size=bs, shuffle=True)
     val_loader   = DataLoader(val_list, batch_size=bs, shuffle=False)
     test_loader  = DataLoader(test_list, batch_size=bs, shuffle=False)
 
-    # Optional checkpoint warm-start
     ckpt = hparams.get('checkpoint', None)
     if ckpt is not None and pathlib.Path(ckpt).exists():
         state = torch.load(ckpt, map_location='cpu')
@@ -156,3 +149,26 @@ def eval_nodeclf(instance: Path, pred: Path, **hparams):
 
     te_loss, te_micro, te_macro = _epoch(model, test_loader, opt, device, train=False)
     print(f"[nodeclf] F1-micro {te_micro:.4f}  F1-macro {te_macro:.4f}")
+
+    # Optional embeddings save
+    save_emb = hparams.get('save_embeddings', None)
+    if save_emb is not None:
+        model.eval()
+        all_list = train_list + val_list + test_list
+        with torch.no_grad():
+            num_nodes = data.num_nodes
+            tmp = all_list[0].to(device)
+            tmp_out = model(tmp.x, tmp.edge_index)
+            dim = tmp_out.size(-1)
+            S = torch.zeros((num_nodes, dim), dtype=torch.float32)
+            C = torch.zeros((num_nodes,), dtype=torch.float32)
+            for dpatch in all_list:
+                dpatch = dpatch.to(device)
+                out = model(dpatch.x, dpatch.edge_index).detach().cpu()
+                gidx = dpatch.gidx.detach().cpu().long()
+                S[gidx] += out
+                C[gidx] += 1.0
+            C[C == 0] = 1.0
+            E = S / C.unsqueeze(-1)
+            torch.save(E, save_emb)
+        print(f"[nodeclf] Saved embeddings to {save_emb}")

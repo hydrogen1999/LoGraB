@@ -1,7 +1,6 @@
 from typing import Set, Tuple, List
 import networkx as nx
 
-
 def coverage_precision_recall_cohesion(E_pred: Set[Tuple[int, int]],
                                        E_true: Set[Tuple[int, int]],
                                        V_true: Set[int]):
@@ -15,7 +14,6 @@ def coverage_precision_recall_cohesion(E_pred: Set[Tuple[int, int]],
     precision = tp / len(E_pred) if E_pred else 0.0
     recall = tp / len(E_true) if E_true else 0.0
 
-    # Cohesion over connected components of predicted graph
     cohesion_vals: List[float] = []
     weight_vals: List[int] = []
     if E_pred and E_true:

@@ -7,12 +7,11 @@ from scipy.sparse.linalg import eigsh
 LaplacianType = Literal["unnormalized", "normalized"]
 
 def _build_sparse_adj(edge_index_np: np.ndarray, num_nodes: int) -> csr_matrix:
-    # edge_index: shape [2, E], undirected expected (we symmetrize anyway)
     row, col = edge_index_np
     data = np.ones(row.shape[0], dtype=np.float64)
     A = csr_matrix((data, (row, col)), shape=(num_nodes, num_nodes))
-    A = A.maximum(A.T)  # ensure symmetry
-    A.setdiag(0)        # drop self-loops if any
+    A = A.maximum(A.T)
+    A.setdiag(0)
     A.eliminate_zeros()
     return A
 
@@ -31,41 +30,27 @@ def _normalized_laplacian(A: csr_matrix) -> csr_matrix:
 
 def spectral_embed(edge_index: torch.Tensor, num_nodes: int, k: int, sigma: float,
                    laplacian: LaplacianType = "unnormalized") -> Optional[Dict[str, Any]]:
-    """
-    Return dict with k eigenvectors (+noise) and k+1 eigenvalues of the chosen Laplacian.
-    Handles small patches safely and uses robust sparse solvers.
-    """
     if num_nodes <= 1:
         return None
+    k_eff = max(1, min(k, num_nodes - 1))
 
-    k_eff = max(1, min(k, num_nodes - 1))  # at most n-1 non-zero eigenvalues for connected components
-
-    # Build sparse Laplacian
     ei_np = edge_index.detach().cpu().numpy()
     A = _build_sparse_adj(ei_np, num_nodes)
     if laplacian == "normalized":
-        L = _normalized_laplacian(A)
-        which = "SM"
+        L = _normalized_laplacian(A); which = "SM"
     else:
-        L = _unnormalized_laplacian(A)
-        which = "SM"
+        L = _unnormalized_laplacian(A); which = "SM"
 
-    # Compute (k_eff + 1) smallest magnitude eigenpairs for stability
     want = min(k_eff + 1, max(1, num_nodes - 1))
     try:
         evals, evecs = eigsh(L, k=want, which=which)
     except Exception:
-        # Shift + invert as fallback
         evals, evecs = eigsh(L + 1e-3 * identity(num_nodes, format="csr"),
                              k=want, which="LM", sigma=0.0)
 
-    # Truncate to k_eff eigenvectors (drop the extra one used for residual/error diagnostics)
     evecs = evecs[:, :k_eff].astype(np.float32)
     if sigma > 0:
         evecs = evecs + np.random.normal(scale=sigma, size=evecs.shape).astype(np.float32)
 
     evals = evals.astype(np.float32)
-    return {
-        "eigvec": torch.from_numpy(evecs),
-        "eigval": torch.from_numpy(evals[:k_eff + 1])  # keep k+1 evals if available
-    }
+    return {"eigvec": torch.from_numpy(evecs), "eigval": torch.from_numpy(evals[:k_eff + 1])}

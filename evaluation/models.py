@@ -19,7 +19,6 @@ def get_builder(name_or_path: str) -> Callable[..., nn.Module]:
     key = name_or_path.lower()
     if key in _REGISTRY:
         return _REGISTRY[key]
-    # dynamic import path: "pkg.module:callable"
     if ":" not in name_or_path:
         raise KeyError(f"Unknown model '{name_or_path}'. Use a registered name or 'pkg.module:builder' path.")
     mod_path, call = name_or_path.split(":", 1)
@@ -28,8 +27,6 @@ def get_builder(name_or_path: str) -> Callable[..., nn.Module]:
     if not callable(fn):
         raise TypeError(f"Imported object '{name_or_path}' is not callable")
     return fn
-
-# ------- Built-in baselines -------
 
 @register_model("gcn")
 def _build_gcn(in_dim: int, out_dim: int, hid: int = 64, dropout: float = 0.5, **kw):
