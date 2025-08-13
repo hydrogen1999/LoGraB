@@ -54,6 +54,7 @@ def eval_linkpred(instance: Path, pred: Path, embeddings: Path = None, scorer: s
     data = load_source_graph(ds_name)
     num_nodes = data.num_nodes
 
+    # Load embeddings if provided, else fall back to data.x (or zeros)
     if embeddings is not None and Path(embeddings).exists():
         X = torch.load(embeddings, map_location='cpu').float()
         if X.ndim == 1:
@@ -61,7 +62,17 @@ def eval_linkpred(instance: Path, pred: Path, embeddings: Path = None, scorer: s
         if X.size(0) != num_nodes:
             raise ValueError(f"Embeddings rows ({X.size(0)}) != num_nodes ({num_nodes})")
     else:
-        X = data.x.float()
+        X = getattr(data, "x", None)
+        if X is None:
+            X = torch.zeros((num_nodes, 1), dtype=torch.float32)
+        else:
+            X = data.x.float()
+
+    # Pre-normalize if cosine (for faster pair scoring)
+    if scorer == "cosine":
+        Xn = X / (X.norm(dim=1, keepdim=True) + 1e-12)
+    else:
+        Xn = X
 
     E_true = true_edges_all(data)
     E_pred = load_predicted_edges(pred)
@@ -78,12 +89,7 @@ def eval_linkpred(instance: Path, pred: Path, embeddings: Path = None, scorer: s
     neg = _sample_negatives(num_nodes, len(pos), E_true, comp, rng)
 
     def score(u, v):
-        if scorer == "cosine":
-            xu, xv = X[u], X[v]
-            nu = torch.norm(xu).item() or 1.0
-            nv = torch.norm(xv).item() or 1.0
-            return float(torch.dot(xu, xv).item() / (nu * nv))
-        return float((X[u] * X[v]).sum().item())
+        return float((Xn[u] * Xn[v]).sum().item())
 
     y = np.array([1]*len(pos) + [0]*len(neg), dtype=np.int32)
     s = np.array([score(u, v) for (u, v) in pos] + [score(u, v) for (u, v) in neg], dtype=np.float32)

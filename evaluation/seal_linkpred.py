@@ -1,4 +1,3 @@
-# evaluation/seal_linkpred.py
 from __future__ import annotations
 from pathlib import Path
 import gzip, json, random
@@ -14,22 +13,33 @@ from sklearn.metrics import roc_auc_score, average_precision_score
 
 from .utils import load_metadata, load_source_graph
 
-
 # -------------------------
-# Fast co-occurrence (bit-pack)
+# Fast co-occurrence with throttling
 # -------------------------
-def _build_cooc_ei(rows: List[dict], num_nodes: int) -> torch.Tensor:
+def _build_cooc_ei(rows: List[dict], num_nodes: int, max_pairs_per_patch: int = 20000):
     """
-    Xây H bằng cách nối mọi cặp (u,v) cùng xuất hiện trong *bất kỳ* patch nào.
-    Dùng bit-pack (u<<32)|v để giảm overhead Python set.
+    Build H by connecting all node pairs that co-occur in any patch, but throttle
+    the number of pairs per patch to avoid combinatorial explosion on large patches.
     """
+    from itertools import combinations
     E64: Set[int] = set()
     for r in rows:
         nodes = sorted(set(int(x) for x in r["nodes_global"]))
-        # itertools.combinations ở C rất nhanh; không cần hai vòng for thuần Python
-        from itertools import combinations
+        m = len(nodes)
+        if m < 2:
+            continue
+        # If pairs exceed max, downsample nodes to keep pair count <= max_pairs_per_patch
+        total_pairs = m * (m - 1) // 2
+        if total_pairs > max_pairs_per_patch:
+            # keep ~= ceil( (1+sqrt(1+8*max))/2 )
+            import math, random as _rnd
+            keep = max(2, int((1 + (1 + 8 * max_pairs_per_patch) ** 0.5) // 2))
+            keep = min(keep, m)
+            nodes = _rnd.sample(nodes, keep)
         for u, v in combinations(nodes, 2):
-            E64.add((u << 32) | v)
+            if u == v: 
+                continue
+            E64.add((min(u, v) << 32) | max(u, v))
     if not E64:
         raise RuntimeError("Co-occurrence graph empty.")
     src = [e >> 32 for e in E64]
@@ -38,14 +48,12 @@ def _build_cooc_ei(rows: List[dict], num_nodes: int) -> torch.Tensor:
     ei = torch.tensor([src + dst, dst + src], dtype=torch.long)
     return ei
 
-
 def _load_rows(instance: Path) -> List[dict]:
     rows = []
     with gzip.open(instance / "patches.jsonl.gz", "rt", encoding="utf-8") as f:
         for line in f:
             rows.append(json.loads(line))
     return rows
-
 
 # -------------------------
 # DRNL (double-radius node labeling)
@@ -79,28 +87,24 @@ def _drnl(edge_index: torch.Tensor, u: int, v: int, n: int) -> torch.Tensor:
             labels.append(1 + m + (s * (s + 1)) // 2)
     return torch.tensor(labels, dtype=torch.long)
 
-
 # -------------------------
-# Tạo subgraph cho 1 cặp (u,v)
+# Subgraph builder for one pair (u,v)
 # -------------------------
 def _pair_subgraph(H_ei: torch.Tensor, u: int, v: int, x: torch.Tensor, hops: int = 2) -> Data:
     subset, sub_ei, mapping, _ = k_hop_subgraph([u, v], hops, H_ei, relabel_nodes=True)
-    lu, lv = int(mapping[0]), int(mapping[1])  # chỉ số local của u,v
+    lu, lv = int(mapping[0]), int(mapping[1])
     labels = _drnl(sub_ei, lu, lv, subset.numel())
 
     d = Data(
         x=x[subset],
         edge_index=sub_ei,
         drnl=labels,
-        # Lưu vị trí local 2 node mục tiêu, để pooling “target-aware”
         target_local=torch.tensor([lu, lv], dtype=torch.long),
     )
     return d
 
-
 # -------------------------
-# Mô hình: Target-Aware Pooling (đúng chuẩn SEAL)
-# Lấy biểu diễn tại đúng 2 node (u, v) + summary subgraph
+# Target-aware SEAL
 # -------------------------
 class SEALTargetAware(nn.Module):
     def __init__(self, in_dim: int, hid: int, num_labels: int, readout: str = "max"):
@@ -109,7 +113,6 @@ class SEALTargetAware(nn.Module):
         self.gcn1 = GCNConv(in_dim + 32, hid)
         self.gcn2 = GCNConv(hid, hid)
         self.readout = readout
-        # Đặc trưng target-aware: h_u, h_v, |h_u - h_v|, h_u * h_v, h_pool
         feat_dim = hid * 5
         self.mlp = nn.Sequential(
             nn.Linear(feat_dim, hid),
@@ -122,37 +125,31 @@ class SEALTargetAware(nn.Module):
         z = self.gcn1(z, edge_index).relu()
         z = self.gcn2(z, edge_index).relu()
 
-        # Global summary của subgraph (theo graph)
         if self.readout == "add":
             h_pool = global_add_pool(z, batch)
         else:
-            h_pool = global_max_pool(z, batch)  # mặc định
+            h_pool = global_max_pool(z, batch)
 
-        # --- Target-aware gather: lấy đúng embedding tại node u,v trong từng subgraph ---
-        # ptr: [num_graphs+1], offset node theo graph. (có trong PyG >= 2.x)
         if ptr is None:
-            # Fallback nếu batch.ptr vắng: tính từ 'batch'
-            # (chậm hơn; chỉ xảy ra khi PyG cũ)
             num_graphs = int(batch.max().item()) + 1
             counts = torch.bincount(batch, minlength=num_graphs)
             ptr = torch.zeros(num_graphs + 1, dtype=torch.long, device=batch.device)
             ptr[1:] = torch.cumsum(counts, dim=0)
 
         num_graphs = ptr.numel() - 1
-        uv = target_local.view(num_graphs, 2)                     # [G,2]
-        offs = ptr[:-1].unsqueeze(1).expand_as(uv)                # [G,2]
-        idx = (uv + offs).reshape(-1)                             # [2G]
-        z_uv = z.index_select(0, idx)                             # [2G, hid]
-        h_u = z_uv[0::2]                                          # [G, hid]
-        h_v = z_uv[1::2]                                          # [G, hid]
+        uv = target_local.view(num_graphs, 2)
+        offs = ptr[:-1].unsqueeze(1).expand_as(uv)
+        idx = (uv + offs).reshape(-1)
+        z_uv = z.index_select(0, idx)
+        h_u = z_uv[0::2]
+        h_v = z_uv[1::2]
 
         feats = torch.cat([h_u, h_v, (h_u - h_v).abs(), h_u * h_v, h_pool], dim=1)
         logits = self.mlp(feats)
         return logits
 
-
 # -------------------------
-# API chạy
+# API
 # -------------------------
 def eval_linkpred_seal(
     instance: Path,
@@ -162,6 +159,7 @@ def eval_linkpred_seal(
     seed: int = 42,
     num_workers: int = 0,
     readout: str = "max",
+    max_pairs_per_patch: int = 20000,
 ):
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
 
@@ -172,8 +170,7 @@ def eval_linkpred_seal(
     num_nodes = data.num_nodes
     x = data.x.float() if getattr(data, "x", None) is not None else torch.zeros((num_nodes, 1))
 
-    # H: co-occurrence graph (nhanh)
-    H_ei = _build_cooc_ei(rows, num_nodes)
+    H_ei = _build_cooc_ei(rows, num_nodes, max_pairs_per_patch=max_pairs_per_patch)
 
     # G (ground-truth)
     E_true: Set[Tuple[int, int]] = set()
@@ -181,7 +178,7 @@ def eval_linkpred_seal(
         if a == b: continue
         E_true.add((min(a, b), max(a, b)))
 
-    # Positives = cạnh thuộc G nhưng *chưa có* trong H (mới để dự đoán)
+    # Positives = cạnh thuộc G nhưng chưa có trong H
     H_edges = set()
     for a, b in zip(H_ei[0].tolist(), H_ei[1].tolist()):
         if a == b: continue
@@ -206,21 +203,18 @@ def eval_linkpred_seal(
     pairs = pos + neg
     y = np.array([1]*len(pos) + [0]*len(neg), dtype=np.int64)
 
-    # Dataset subgraph
     ds: List[Data] = []
     for (u, v), yi in zip(pairs, y):
         d = _pair_subgraph(H_ei, u, v, x, hops=hops)
         d.y = torch.tensor(yi, dtype=torch.long)
         ds.append(d)
 
-    # Train/Test split
     n = len(ds)
     idx = np.random.permutation(n)
     ntr = int(0.8 * n)
     tr_ds = [ds[i] for i in idx[:ntr]]
     te_ds = [ds[i] for i in idx[ntr:]]
 
-    # Xác định num_labels theo DRNL lớn nhất của tập train (an toàn hơn hardcode)
     max_label = max(int(d.drnl.max()) for d in tr_ds) + 1
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -243,7 +237,6 @@ def eval_linkpred_seal(
             loss = ce(logits, batch.y.view(-1))
             opt.zero_grad(); loss.backward(); opt.step()
 
-    # Evaluate
     model.eval()
     scores, labels = [], []
     with torch.no_grad():

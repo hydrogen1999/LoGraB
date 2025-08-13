@@ -10,10 +10,12 @@ def load_metadata(instance_path: Path) -> Dict[str, Any]:
 
 def load_source_graph(dataset_name: str):
     root = Path("source_data") / dataset_name
-    name = dataset_name.lower()
-    if name in {"cora", "citeseer", "pubmed"}:
-        return Planetoid(str(root), name=dataset_name)[0]
-    if name in {"ogbn-arxiv", "ogbn_arxiv"}:
+    key = dataset_name.lower()
+    PLANETOID_CANON = {"cora": "Cora", "citeseer": "CiteSeer", "pubmed": "PubMed"}
+    if key in PLANETOID_CANON:
+        canon = PLANETOID_CANON[key]
+        return Planetoid(str(root), name=canon)[0]
+    if key in {"ogbn-arxiv", "ogbn_arxiv"}:
         from ogb.nodeproppred import PygNodePropPredDataset
         ds = PygNodePropPredDataset(name="ogbn-arxiv", root=str(root))
         data = ds[0]

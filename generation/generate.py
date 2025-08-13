@@ -39,6 +39,9 @@ def generate(cfg: Dict[str, Any]):
             spec = spectral_embed(patch["edge_index"], n_local, k, sigma, laplacian=laplacian)
             if spec is None:
                 continue
+            l2g = patch.get("local_to_global_map")
+            if l2g is None:
+                raise KeyError("get_d_hop_patch must return 'local_to_global_map'")
             row = {
                 "id": f"patch_{int(v)}",
                 "nodes_global": patch["nodes"].tolist(),
@@ -46,7 +49,7 @@ def generate(cfg: Dict[str, Any]):
                 "eigval": spec["eigval"].tolist(),
                 "center_node_global": int(v),
                 "strategy": strategy,
-                "local_to_global_map": {str(l): int(g) for l, g in patch["local2global"].items()},
+                "local_to_global_map": {str(int(l)): int(g) for l, g in l2g.items()},
             }
             all_rows.append(row)
 
@@ -82,6 +85,9 @@ def generate(cfg: Dict[str, Any]):
             spec = spectral_embed(patch["edge_index"], n_local, k, sigma, laplacian=laplacian)
             if spec is None:
                 continue
+            l2g = patch.get("local_to_global_map")
+            if l2g is None:
+                raise KeyError("get_d_hop_patch must return 'local_to_global_map'")
             row = {
                 "id": f"patch_{len(all_rows)}",
                 "nodes_global": patch["nodes"].tolist(),
@@ -89,7 +95,7 @@ def generate(cfg: Dict[str, Any]):
                 "eigval": spec["eigval"].tolist(),
                 "center_node_global": patch.get("center"),
                 "strategy": strategy,
-                "local_to_global_map": {str(int(l)): int(g) for l, g in patch["local2global"].items()},
+                "local_to_global_map": {str(int(l)): int(g) for l, g in l2g.items()},
             }
             all_rows.append(row)
     else:
