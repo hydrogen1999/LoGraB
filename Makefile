@@ -62,3 +62,68 @@ run: gen-data eval
 
 clean:
 	rm -rf .venv artifacts
+
+
+# ==== Baselines nâng cao ====
+K_RECON     ?= 10
+HOPS_SEAL   ?= 2
+EPOCHS_SEAL ?= 20
+BATCH_SEAL  ?= 64
+
+.PHONY: recon-eigsync recon-eigsync-% linkpred-seal linkpred-seal-%
+
+recon-eigsync: setup
+	@for ds in $(DATASETS); do \
+	  TAG=$$( \
+	    $(PYTHON) - <<'PY' \
+strategy="$(STRATEGY)"; d=int("$(D)"); k=int("$(K)"); sigma=float("$(SIGMA)"); p=float("$(P)"); lap="$(LAP)"; \
+print(f"{strategy}_d{d}_k{k}_s{sigma:.2f}_p{p}_{lap[0]}") \
+PY \
+	  ); \
+	  INSTANCE="$(ROOT_DIR)/$$ds/$$TAG"; \
+	  ARTI="artifacts/$$ds/$$TAG"; mkdir -p "$$ARTI" "artifacts/logs/$$ds/$$TAG"; \
+	  echo "[eigsync] $$INSTANCE"; \
+	  scripts/gen_pred_eigsync.sh "$$INSTANCE" "$$ARTI/pred_eigsync.txt" "$(K_RECON)" | tee "artifacts/logs/$$ds/$$TAG/07_eigsync_gen.log"; \
+	  $(PYTHON) -m lograb eval --task reconstruct --instance "$$INSTANCE" --pred "$$ARTI/pred_eigsync.txt" | tee "artifacts/logs/$$ds/$$TAG/08_eigsync_eval.log"; \
+	done
+
+recon-eigsync-%: setup
+	@ds=$*; \
+	TAG=$$( \
+	  $(PYTHON) - <<'PY' \
+strategy="$(STRATEGY)"; d=int("$(D)"); k=int("$(K)"); sigma=float("$(SIGMA)"); p=float("$(P)"); lap="$(LAP)"; \
+print(f"{strategy}_d{d}_k{k}_s{sigma:.2f}_p{p}_{lap[0]}") \
+PY \
+	); \
+	INSTANCE="$(ROOT_DIR)/$$ds/$$TAG"; \
+	ARTI="artifacts/$$ds/$$TAG"; mkdir -p "$$ARTI" "artifacts/logs/$$ds/$$TAG"; \
+	echo "[eigsync] $$INSTANCE"; \
+	scripts/gen_pred_eigsync.sh "$$INSTANCE" "$$ARTI/pred_eigsync.txt" "$(K_RECON)" | tee "artifacts/logs/$$ds/$$TAG/07_eigsync_gen.log"; \
+	$(PYTHON) -m lograb eval --task reconstruct --instance "$$INSTANCE" --pred "$$ARTI/pred_eigsync.txt" | tee "artifacts/logs/$$ds/$$TAG/08_eigsync_eval.log"
+
+linkpred-seal: setup
+	@for ds in $(DATASETS); do \
+	  TAG=$$( \
+	    $(PYTHON) - <<'PY' \
+strategy="$(STRATEGY)"; d=int("$(D)"); k=int("$(K)"); sigma=float("$(SIGMA)"); p=float("$(P)"); lap="$(LAP)"; \
+print(f"{strategy}_d{d}_k{k}_s{sigma:.2f}_p{p}_{lap[0]}") \
+PY \
+	  ); \
+	  INSTANCE="$(ROOT_DIR)/$$ds/$$TAG"; \
+	  mkdir -p "artifacts/logs/$$ds/$$TAG"; \
+	  echo "[seal] $$INSTANCE"; \
+	  scripts/eval_linkpred_seal.sh "$$INSTANCE" "$(HOPS_SEAL)" "$(EPOCHS_SEAL)" "$(BATCH_SEAL)" | tee "artifacts/logs/$$ds/$$TAG/09_seal_eval.log"; \
+	done
+
+linkpred-seal-%: setup
+	@ds=$*; \
+	TAG=$$( \
+	  $(PYTHON) - <<'PY' \
+strategy="$(STRATEGY)"; d=int("$(D)"); k=int("$(K)"); sigma=float("$(SIGMA)"); p=float("$(P)"); lap="$(LAP)"; \
+print(f"{strategy}_d{d}_k{k}_s{sigma:.2f}_p{p}_{lap[0]}") \
+PY \
+	); \
+	INSTANCE="$(ROOT_DIR)/$$ds/$$TAG"; \
+	mkdir -p "artifacts/logs/$$ds/$$TAG"; \
+	echo "[seal] $$INSTANCE"; \
+	scripts/eval_linkpred_seal.sh "$$INSTANCE" "$(HOPS_SEAL)" "$(EPOCHS_SEAL)" "$(BATCH_SEAL)" | tee "artifacts/logs/$$ds/$$TAG/09_seal_eval.log"
