@@ -98,7 +98,6 @@ def generate(cfg: Dict[str, Any]):
     patches_path = root / "patches.jsonl.gz"
     write_jsonl_gz(patches_path, all_rows)
 
-    import numpy as np
     metadata = {
         "dataset": ds_name,
         "strategy": strategy,
