@@ -31,7 +31,7 @@ def coverage_precision_recall_cohesion(E_pred: Set[Tuple[int, int]],
 
         for comp in nx.connected_components(G_pred):
             comp = set(comp)
-            # Count gt edges internal to this comp by summing adj degrees and halving
+            # Count GT edges internal to this component
             gt_edges = 0
             for u in comp:
                 gt_edges += sum(1 for v in adj_true.get(u, ()) if v in comp)
@@ -39,11 +39,8 @@ def coverage_precision_recall_cohesion(E_pred: Set[Tuple[int, int]],
             if gt_edges == 0:
                 continue
 
-            # Count predicted edges internal to this comp
-            pred_intra = 0
-            for (u, v) in E_pred:
-                if u in comp and v in comp:
-                    pred_intra += 1
+            # Much faster: ask NetworkX for the number of predicted edges inside this component
+            pred_intra = G_pred.subgraph(comp).number_of_edges()
 
             cohesion_vals.append(pred_intra / gt_edges)
             weight_vals.append(gt_edges)

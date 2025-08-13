@@ -10,7 +10,10 @@ INSTANCE="$1"
 OUT="$2"
 mkdir -p "$(dirname "$OUT")"
 
-python - <<'PY'
+PY=".venv/bin/python"; [ -x "$PY" ] || PY="python3"
+[ -f ".venv/bin/activate" ] && . .venv/bin/activate
+
+"$PY" - <<'PY' "$INSTANCE" "$OUT"
 import gzip, json, sys, yaml
 from pathlib import Path
 from collections import defaultdict
@@ -19,20 +22,20 @@ from lograb.evaluation.utils import load_source_graph
 instance = Path(sys.argv[1])
 out = Path(sys.argv[2])
 
-# Đọc metadata.yml (YAML, không phải JSON)
+# Read YAML metadata (not JSON)
 meta = yaml.safe_load((instance / "metadata.yml").read_text())
 ds_name = meta["dataset"]
 
-# Tải đồ thị gốc một lần
+# Load source graph once
 data = load_source_graph(ds_name)
 ei = data.edge_index
 
-# Xây dựng adjacency (vô hướng)
+# Build adjacency (undirected)
 adj = defaultdict(set)
 src = ei[0].tolist()
 dst = ei[1].tolist()
 for u, v in zip(src, dst):
-    if u == v: 
+    if u == v:
         continue
     adj[u].add(v)
     adj[v].add(u)
@@ -42,7 +45,7 @@ with gzip.open(instance / "patches.jsonl.gz", "rt", encoding="utf-8") as f:
     for line in f:
         row = json.loads(line)
         V = set(int(x) for x in row.get("nodes_global", []))
-        # Thêm toàn bộ cạnh thật nằm trong patch
+        # Add all true edges strictly inside this patch
         for u in V:
             for v in adj[u]:
                 if v in V and u < v:
@@ -54,4 +57,3 @@ with out.open("w") as fo:
         fo.write(f"{u} {v}\n")
 print(f"[pred] wrote {out} with {len(E_pred)} edges")
 PY
-"$INSTANCE" "$OUT"

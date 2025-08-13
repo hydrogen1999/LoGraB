@@ -1,6 +1,6 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Set, Tuple, Dict, Any, List
+from typing import Set, Tuple, Dict, List
 
 import networkx as nx
 import numpy as np
@@ -28,7 +28,8 @@ def _pairs_cross_components(E_true: Set[Tuple[int, int]], comp: Dict[int, int]) 
             pos.append((u, v))
     return pos
 
-def _sample_negatives(num_nodes, size, E_true, comp, rng):
+def _sample_negatives_strict(num_nodes, size, E_true, comp, rng):
+    """Only pairs whose both endpoints are in comp-map and belong to different components."""
     neg = set()
     nodes_with_comp = list(comp.keys())
     if len(nodes_with_comp) < 2:
@@ -43,6 +44,29 @@ def _sample_negatives(num_nodes, size, E_true, comp, rng):
         a, b = (u, v) if u < v else (v, u)
         if (a, b) in E_true:
             continue
+        neg.add((a, b))
+    return list(neg)
+
+def _sample_negatives_fallback(num_nodes, need, E_true, comp, rng):
+    """Fill the remaining negatives by sampling the whole graph.
+       - Still avoids true edges.
+       - If both nodes have component labels and are the same component -> skip.
+       - If one/both nodes have no label -> allow (to ensure completion).
+    """
+    neg = set()
+    trials = 0
+    max_trials = 200 * max(1, need)
+    while len(neg) < need and trials < max_trials:
+        u = rng.randrange(num_nodes); v = rng.randrange(num_nodes)
+        trials += 1
+        if u == v: 
+            continue
+        a, b = (u, v) if u < v else (v, u)
+        if (a, b) in E_true or (a, b) in neg:
+            continue
+        cu, cv = comp.get(u), comp.get(v)
+        if (cu is not None) and (cv is not None) and cu == cv:
+            continue  # both labeled and same component -> skip
         neg.add((a, b))
     return list(neg)
 
@@ -86,7 +110,12 @@ def eval_linkpred(instance: Path, pred: Path, embeddings: Path = None, scorer: s
     max_pairs = 200_000
     if len(pos) > max_pairs:
         rng.shuffle(pos); pos = pos[:max_pairs]
-    neg = _sample_negatives(num_nodes, len(pos), E_true, comp, rng)
+
+    # Negatives: strict first, then fallback to reach |pos|
+    neg = _sample_negatives_strict(num_nodes, len(pos), E_true, comp, rng)
+    if len(neg) < len(pos):
+        need = len(pos) - len(neg)
+        neg += _sample_negatives_fallback(num_nodes, need, E_true, comp, rng)
 
     def score(u, v):
         return float((Xn[u] * Xn[v]).sum().item())

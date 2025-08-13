@@ -31,9 +31,8 @@ def _build_cooc_ei(rows: List[dict], num_nodes: int, max_pairs_per_patch: int = 
         # If pairs exceed max, downsample nodes to keep pair count <= max_pairs_per_patch
         total_pairs = m * (m - 1) // 2
         if total_pairs > max_pairs_per_patch:
-            # keep ~= ceil( (1+sqrt(1+8*max))/2 )
-            import math, random as _rnd
-            keep = max(2, int((1 + (1 + 8 * max_pairs_per_patch) ** 0.5) // 2))
+            import random as _rnd
+            keep = max(2, int((1 + (1 + 8 * max_pairs_per_patch) ** 0.5) // 2))  # ~solve keep*(keep-1)/2 <= max
             keep = min(keep, m)
             nodes = _rnd.sample(nodes, keep)
         for u, v in combinations(nodes, 2):
