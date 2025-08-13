@@ -37,20 +37,26 @@ def spectral_embed(edge_index: torch.Tensor, num_nodes: int, k: int, sigma: floa
     ei_np = edge_index.detach().cpu().numpy()
     A = _build_sparse_adj(ei_np, num_nodes)
     if laplacian == "normalized":
-        L = _normalized_laplacian(A); which = "SM"
+        L = _normalized_laplacian(A)
     else:
-        L = _unnormalized_laplacian(A); which = "SM"
+        L = _unnormalized_laplacian(A)
 
+    # We want the smallest eigenpairs; fallback to shift-invert around 0 if needed
     want = min(k_eff + 1, max(1, num_nodes - 1))
     try:
-        evals, evecs = eigsh(L, k=want, which=which)
+        evals, evecs = eigsh(L, k=want, which="SM")
     except Exception:
-        evals, evecs = eigsh(L + 1e-3 * identity(num_nodes, format="csr"),
-                             k=want, which="LM", sigma=0.0)
+        evals, evecs = eigsh(L, k=want, which="LM", sigma=0.0)
 
-    evecs = evecs[:, :k_eff].astype(np.float32)
+    # Sort ascending by eigenvalue, drop the trivial 0-eigenvector when present
+    order = np.argsort(evals)
+    evals = evals[order]
+    evecs = evecs[:, order]
+    start = 1 if evals[0] < 1e-9 else 0
+    vecs = evecs[:, start:start + k_eff].astype(np.float32)
+    vals = evals[start:start + k_eff + 1].astype(np.float32)
+
     if sigma > 0:
-        evecs = evecs + np.random.normal(scale=sigma, size=evecs.shape).astype(np.float32)
+        vecs = (vecs + np.random.normal(scale=sigma, size=vecs.shape)).astype(np.float32)
 
-    evals = evals.astype(np.float32)
-    return {"eigvec": torch.from_numpy(evecs), "eigval": torch.from_numpy(evals[:k_eff + 1])}
+    return {"eigvec": torch.from_numpy(vecs), "eigval": torch.from_numpy(vals)}

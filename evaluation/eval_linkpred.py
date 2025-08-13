@@ -116,6 +116,11 @@ def eval_linkpred(instance: Path, pred: Path, embeddings: Path = None, scorer: s
     if len(neg) < len(pos):
         need = len(pos) - len(neg)
         neg += _sample_negatives_fallback(num_nodes, need, E_true, comp, rng)
+    # Final balance guard
+    if len(neg) < len(pos):
+        rng.shuffle(pos); pos = pos[:len(neg)]
+
+    print(f"[linkpred] pairs: pos={len(pos)} neg={len(neg)}")
 
     def score(u, v):
         return float((Xn[u] * Xn[v]).sum().item())

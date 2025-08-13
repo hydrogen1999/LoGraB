@@ -20,7 +20,7 @@ def coverage_precision_recall_cohesion(E_pred: Set[Tuple[int, int]],
     cohesion_vals: List[float] = []
     weight_vals: List[int] = []
     if E_pred and E_true:
-        # Build true adjacency once
+        # Build true adjacency once (for fast "GT edges inside comp" enumeration)
         adj_true: Dict[int, Set[int]] = {}
         for a, b in E_true:
             adj_true.setdefault(a, set()).add(b)
@@ -31,18 +31,21 @@ def coverage_precision_recall_cohesion(E_pred: Set[Tuple[int, int]],
 
         for comp in nx.connected_components(G_pred):
             comp = set(comp)
-            # Count GT edges internal to this component
-            gt_edges = 0
+
+            # Enumerate GT edges inside this component
+            gt_edges_list = []
             for u in comp:
-                gt_edges += sum(1 for v in adj_true.get(u, ()) if v in comp)
-            gt_edges //= 2
+                gt_edges_list += [(min(u, v), max(u, v))
+                                  for v in adj_true.get(u, ())
+                                  if v in comp and u < v]
+            gt_edges = len(gt_edges_list)
             if gt_edges == 0:
                 continue
 
-            # Much faster: ask NetworkX for the number of predicted edges inside this component
-            pred_intra = G_pred.subgraph(comp).number_of_edges()
+            # True positives inside this component: (E_pred ∩ E_true) restricted to comp
+            tp_intra = sum(1 for e in gt_edges_list if e in E_pred)
 
-            cohesion_vals.append(pred_intra / gt_edges)
+            cohesion_vals.append(tp_intra / gt_edges)
             weight_vals.append(gt_edges)
 
     cohesion = (sum(w * c for w, c in zip(weight_vals, cohesion_vals)) / sum(weight_vals)) if weight_vals else 0.0
