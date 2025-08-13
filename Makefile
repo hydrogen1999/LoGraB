@@ -69,6 +69,9 @@ K_RECON     ?= 10
 HOPS_SEAL   ?= 2
 EPOCHS_SEAL ?= 20
 BATCH_SEAL  ?= 64
+READOUT_SEAL?= max
+NUM_WORKERS_SEAL ?= 0
+SEAL_SEED   ?= 42
 
 .PHONY: recon-eigsync recon-eigsync-% linkpred-seal linkpred-seal-%
 
@@ -103,16 +106,15 @@ PY \
 
 linkpred-seal: setup
 	@for ds in $(DATASETS); do \
-	  TAG=$$( \
-	    $(PYTHON) - <<'PY' \
+	  TAG=$$( $(PYTHON) - <<'PY' \
 strategy="$(STRATEGY)"; d=int("$(D)"); k=int("$(K)"); sigma=float("$(SIGMA)"); p=float("$(P)"); lap="$(LAP)"; \
 print(f"{strategy}_d{d}_k{k}_s{sigma:.2f}_p{p}_{lap[0]}") \
-PY \
-	  ); \
-	  INSTANCE="$(ROOT_DIR)/$$ds/$$TAG"; \
-	  mkdir -p "artifacts/logs/$$ds/$$TAG"; \
+PY ); \
+	  INSTANCE="$(ROOT_DIR)/$$ds/$$TAG"; mkdir -p "artifacts/logs/$$ds/$$TAG"; \
 	  echo "[seal] $$INSTANCE"; \
-	  scripts/eval_linkpred_seal.sh "$$INSTANCE" "$(HOPS_SEAL)" "$(EPOCHS_SEAL)" "$(BATCH_SEAL)" | tee "artifacts/logs/$$ds/$$TAG/09_seal_eval.log"; \
+	  NUM_WORKERS=$(NUM_WORKERS_SEAL) SEAL_SEED=$(SEAL_SEED) \
+	  scripts/eval_linkpred_seal.sh "$$INSTANCE" "$(HOPS_SEAL)" "$(EPOCHS_SEAL)" "$(BATCH_SEAL)" "$(READOUT_SEAL)" \
+	  | tee "artifacts/logs/$$ds/$$TAG/09_seal_eval.log"; \
 	done
 
 linkpred-seal-%: setup
